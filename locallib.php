@@ -43,12 +43,56 @@ function bigbluebuttonbn_logs(array $bbbsession, $event, array $overrides = [], 
     $log->userid = isset($overrides['userid'])? $overrides['userid']: $bbbsession['userID'];
     $log->meetingid = isset($overrides['meetingid'])? $overrides['meetingid']: $bbbsession['meetingid'];
     $log->timecreated = isset($overrides['timecreated'])? $overrides['timecreated']: time();
+    $log->server = isset($overrides['server'])? $overrides['server']: $bbbsession['server'];
     $log->log = $event;
     if ( isset($meta) ) {
         $log->meta = $meta;
     } else if( $event == BIGBLUEBUTTONBN_LOG_EVENT_CREATE) {
         $log->meta = '{"record":'.($bbbsession['record']? 'true': 'false').'}';
     }
+
+    $meetingID = $bbbsession['bigbluebuttonbn']->meetingid . '-' . $bbbsession['course']->id . '-' . $bbbsession['bigbluebuttonbn']->id;
+    $meetings = bigbluebuttonbn_getMeetingsArray($meetingID, $bbbsession['endpoint'], $bbbsession['shared_secret']);
+
+    $serverMon = array(
+        'ServerMessage' => '',
+        'CurRunMeetings' => 0,
+        'CurOverAllParticipants' => 0,
+        'CurActiveVideo' => 0,
+        'CurActiveAudio' => 0,
+        'CurListeners' => 0
+    );
+
+    if (!is_null($meetings)) {
+        if (!isset($meetings['returncode'])) {
+                    $serverMon['CurRunMeetings'] = count($meetings);
+
+                    foreach ($meetings as $meeting) {
+                        $serverMon['CurOverAllParticipants'] += $meeting['participantCount'];
+                        $serverMon['CurActiveVideo'] += $meeting['videoCount'];
+                        $serverMon['CurActiveAudio'] += $meeting['voiceParticipantCount'];
+                        $serverMon['CurListeners'] += $meeting['listenerCount'];
+                    }
+        } else {
+            if ($meetings['returncode'] == "SUCCESS") {
+                if ($meetings['messageKey'] == "noMeetings") {
+                    $serverMon['ServerMessage'] = (string) $meetings['message']; // No meetings were found on this server
+                } else {
+                    $serverMon['ServerMessage'] = (string) $meetings['message']; // Other server message
+                }
+            } else {
+                $serverMon['ServerMessage'] = (string) $meetings['message']; // The server returned an error
+            }
+        }
+    } else {
+        $serverMon['ServerMessage'] = "The BBB server is unreachable!"; // Server is not working.
+    }
+
+    $log->server_message = $serverMon['ServerMessage'];
+    $log->cur_overall_participants = $serverMon['CurOverAllParticipants'];
+    $log->cur_active_video = $serverMon['CurActiveVideo'];
+    $log->cur_active_audio = $serverMon['CurActiveAudio'];
+    $log->cur_listeners = $serverMon['CurListeners'];
 
     $returnid = $DB->insert_record('bigbluebuttonbn_logs', $log);
 }
@@ -57,12 +101,12 @@ function bigbluebuttonbn_logs(array $bbbsession, $event, array $overrides = [], 
 //  BigBlueButton API Calls  //
  ////////////////////////////
 function bigbluebuttonbn_getServers( $cluster ) {
-	$dataCluster = [];
-	foreach ($cluster as $key => $clusterData) {
-		$dataCluster[$key] = $key;
-	}
+    $dataCluster = [];
+    foreach ($cluster as $key => $clusterData) {
+        $dataCluster[$key] = $key;
+    }
 
-	return $dataCluster;
+    return $dataCluster;
 }
 
 function bigbluebuttonbn_getJoinURL( $meetingID, $userName, $PW, $SALT, $URL, $logoutURL ) {
@@ -186,7 +230,7 @@ function bigbluebuttonbn_getMeetingsArray($meetingID, $URL, $SALT ) {
 
     } else if($xml && $xml->returncode == 'SUCCESS') {                    //If there were meetings already created
         foreach ($xml->meetings->meeting as $meeting) {
-            $meetings[] = array( 'meetingID' => $meeting->meetingID, 'moderatorPW' => $meeting->moderatorPW, 'attendeePW' => $meeting->attendeePW, 'hasBeenForciblyEnded' => $meeting->hasBeenForciblyEnded, 'running' => $meeting->running );
+            $meetings[] = array( 'meetingID' => $meeting->meetingID, 'moderatorPW' => $meeting->moderatorPW, 'attendeePW' => $meeting->attendeePW, 'hasBeenForciblyEnded' => $meeting->hasBeenForciblyEnded, 'running' => $meeting->running, 'participantCount' => $meeting->participantCount, 'listenerCount' => $meeting->listenerCount, 'voiceParticipantCount' => $meeting->voiceParticipantCount, 'videoCount' => $meeting->videoCount );
         }
         return $meetings;
 
@@ -302,7 +346,7 @@ function bigbluebuttonbn_recordingBuildSorter($a, $b){
 }
 
 function bigbluebuttonbn_doDeleteRecordings( $recordIDs, $URL, $SALT ) {
-    $ids = 	explode(",", $recordIDs);
+    $ids =  explode(",", $recordIDs);
     foreach( $ids as $id){
         $xml = bigbluebuttonbn_wrap_xml_load_file( bigbluebuttonbn_getDeleteRecordingsURL($id, $URL, $SALT) );
         if( $xml && $xml->returncode != 'SUCCESS' ) {
@@ -313,7 +357,7 @@ function bigbluebuttonbn_doDeleteRecordings( $recordIDs, $URL, $SALT ) {
 }
 
 function bigbluebuttonbn_doPublishRecordings( $recordIDs, $set, $URL, $SALT ) {
-    $ids = 	explode(",", $recordIDs);
+    $ids =  explode(",", $recordIDs);
     foreach( $ids as $id){
         $xml = bigbluebuttonbn_wrap_xml_load_file( bigbluebuttonbn_getPublishRecordingsURL($id, $set, $URL, $SALT) );
         if( $xml && $xml->returncode != 'SUCCESS' ) {
